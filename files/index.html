@@ -1,0 +1,221 @@
+<html>
+<head>
+	<script src="jquery-3.3.1.js"> </script>
+<script src="bignumber.js"></script>
+ <script src="web3.min.js"></script> 
+
+<script src="https://cdn.rawgit.com/ethereumjs/browser-builds/2fb69a714afe092b06645286f14b94f41e5c062c/dist/ethereumjs-tx.js"></script>
+	
+</head>
+<body>
+
+	<form id="transactionMethodForm" action="">
+	  <input type="radio" name="transactionMethod" value="metaMask"> Meta Mask Plugin<br>
+	  <input type="radio" name="transactionMethod" value="privateKey" checked="checked">  Use Private Key<br>
+	</form>
+
+	<form id="transactionForm" action="" >
+		<label> Your Account Public Key </label>
+		<input id="publicKey" type="text"/>
+
+		<label> Amount </label>
+		<input id="amount" type="text" />
+
+		<label> To</label>
+		<input id="to" type="text" />
+
+		<label> Gas Price </label>
+		<input id="gasPrice" type="text" />
+
+		<label> Gas Limit </label>
+		<input id="gasLimit" type="text" />
+
+		<label id='privateKeyLabel'> Private Key </label>
+		<input id="privateKey" type="text" />
+
+		<input id="submit" type="button" value="Send"/>
+	</form>
+
+	<h2 id="messageDisplay"></h2>
+
+</body>
+
+<script>
+var account;
+var metaMaskExists = false;
+window.addEventListener('load', function() {
+
+  // Checking if Web3 has been injected by the browser (Mist/MetaMask)
+// Checking if Web3 has been injected by the browser (Mist/MetaMask)
+    web3HttpJs = new Web3(new Web3.providers.HttpProvider("https://ropsten.infura.io/vNqwZBGAgLsMUml2V9jp"));
+  if (typeof web3 !== 'undefined') {
+    // Use Mist/MetaMask's provider
+    web3MetaMaskjs = new Web3(web3.currentProvider);
+    metaMaskExists = true;
+	web3.eth.getAccounts(function(error, result){ 
+    	console.log('error: '+error + ' result: ' + result[0]); 
+    	account = result[0];
+    	
+	});
+  } else {
+    console.log('No web3? You should consider trying MetaMask!')
+    // fallback - use your fallback strategy (local node / hosted node + in-dapp id mgmt / fail)
+    web3HttpJs = new Web3(new Web3.providers.HttpProvider("https://ropsten.infura.io/vNqwZBGAgLsMUml2V9jp"));
+	}
+});
+
+$(document).ready(function(){
+	$('input[value=privateKey]').prop("checked",true);
+    $('input[type="radio"]').click(function(){
+        var inputValue = $(this).attr("value");
+        if(inputValue == 'privateKey')
+        {
+    		$('#privateKey').show();
+    		$('#privateKeyLabel').show();
+			$('#transactionForm').show();
+        }
+        else{
+    		if(!metaMaskExists){
+    			displayMessage("Install Meta Mask PLugin to use Meta Mask");
+    			$('#transactionForm').hide();
+    			return;
+    		}
+
+    		$('#privateKey').hide();
+    		$('#privateKeyLabel').hide();
+
+        }
+    });
+
+$('#submit').on('click', function(e){
+	var amount = $('#amount').val();
+	var to = $('#to').val();
+	var key = $('#privateKey').val();
+	var gasPrice = $('#gasPrice').val();
+	var gasLimit = $('#gasLimit').val();
+	var accountPublicKey = $('#publicKey').val();
+	var method = $('input[name=transactionMethod]:checked', '#transactionMethodForm').val()
+
+	if(gasLimit.indexOf('0x') == -1)
+		gasLimit = '0x' + gasLimit;
+	if(accountPublicKey.indexOf('0x') == -1)
+		accountPublicKey = '0x' + accountPublicKey;
+
+	var transactionAccount;
+
+	if(method == 'metaMask'){
+		web3js = web3MetaMaskjs;
+		transactionAccount = account;
+	}
+	else{
+		web3js = web3HttpJs;
+		transactionAccount = accountPublicKey;
+	}
+
+	web3js.eth.getTransactionCount(transactionAccount,function(err,count){
+		if(err)
+		{
+			displayMessage(err);
+			return;
+		}
+		console.log(count);
+		var rawTx = {
+		  nonce: '0x' + count.toString(16),
+		  gasPrice: web3js.utils.toWei(gasPrice, 'Gwei'), 
+		  gasLimit: gasLimit,
+		  to: to, 
+		  value: web3js.utils.toWei(amount, 'ether'),
+		  from:transactionAccount
+		};
+		web3js.eth.estimateGas(rawTx).then(function(gas){
+			var estimatedCost = rawTx.gasPrice * gas + rawTx.value
+			console.log('estimatedCost: ' + estimatedCost);
+		});
+		if(method == 'metaMask'){
+			displayMessage('Complete Transaction in Meta Mask PLugin');
+
+			web3js.eth.sendTransaction(rawTx).once('transactionHash', function(hash) { console.log('hash:' + hash); displayMessage("Transaction in process...");} )
+			.once('receipt', function(receipt){ console.log('receipt:' + receipt) })
+			.on('confirmation', function(confNumber, receipt){ console.log('confNumber:' + confNumber + ' receipt:' + receipt)})
+			.on('error', function(error){ displayMessage(error) })
+			.then(function(receipt){
+				    console.log('receipt: ' + receipt.status);
+					displayMessage(receipt.status?"Transaction Successful":"Transaction Unsuccessful");
+			}).catch((e) => {
+			  if(e.includes('not mined within 50 blocks')) {
+				var interval = setInterval(function(){
+					web3js.eth.getTransactionReceipt(result).then(function(receipt){
+							if(receipt!=null && receipt.status !== undefined){
+							console.log(receipt.status);
+							clearInterval(interval);
+							displayMessage(receipt.status?"Transaction Successful":"Transaction Unsuccessful");
+						}
+					});
+
+				},5000);
+			  }
+			});
+		}
+		else{
+			var privateKey = new EthJS.Buffer.Buffer(key, 'hex')
+			var tx = new EthJS.Tx(rawTx);
+			tx.sign(privateKey);
+			var serializedTx = tx.serialize();
+			web3js.eth.sendSignedTransaction('0x' + serializedTx.toString('hex'))
+				.once('transactionHash', function(hash){ console.log('hash:' + hash); displayMessage("Transaction in process...");})
+				.once('receipt', function(receipt){ console.log('receipt:' + receipt)})
+				.on('confirmation', function(confNumber, receipt){console.log('confNumber:' + confNumber + ' receipt:' + receipt)})
+				.on('error', function(error){ displayMessage(error)})
+				.then(function(receipt){
+				    // will be fired once the receipt its mined
+				    console.log('receipt: ' + receipt.status);
+				    displayMessage(receipt.status?"Transaction Successful":"Transaction Unsuccessful");
+
+			}).catch((e) => {
+				console.log(e);
+			  if(e.includes('not mined within 50 blocks')) {
+				var interval = setInterval(function(){
+					web3js.eth.getTransactionReceipt(result).then(function(receipt){
+						if(receipt!=null && receipt.status !== undefined){
+							console.log(receipt.status);
+							clearInterval(interval);
+							displayMessage(receipt.status?"Transaction Successful":"Transaction Unsuccessful");
+						}
+					});
+
+				},5000);
+			  }
+			});;
+			//web3js.eth.sendSignedTransaction('0x' + serializedTx.toString('hex'),handleTransaction);
+		}
+	});
+});
+});
+
+
+
+function displayMessage(message){
+	$('#messageDisplay').html (message);
+
+}
+function handleTransaction(error, result){
+	if(!error && result && result != ''){
+		console.log(result);
+		$('#messageDisplay').html ('Transaction Hash: '+ result);
+		displayMessage('Transaction Processing');
+		var interval = setInterval(function(){
+			web3js.eth.getTransactionReceipt(result).then(function(receipt){
+					if(receipt!=null && receipt.status !== undefined){
+					console.log(receipt.status);
+					clearInterval(interval);
+					displayMessage(receipt.status?"Transaction Successful":"Transaction Unsuccessful");
+				}
+			});
+
+		},5000);
+	}
+	else
+		displayMessage('Error Occurred: '+ error);
+}
+</script>
+</html>
